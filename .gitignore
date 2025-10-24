@@ -175,3 +175,7 @@ cython_debug/
 
 # Github folder
 .github/
+
+# custom folders
+models/
+CastleWatch/
