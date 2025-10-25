@@ -14,7 +14,7 @@ from dev.util.constants import DEBUG
 from dev.util.log.logger import logger
 
 
-class ObjectDetector:
+class ColorObjectDetector:
     """
     A modular ObjectDetector class that detects colored objects in video feed,
     calculates their center coordinates, and logs positions at 60Hz frequency.

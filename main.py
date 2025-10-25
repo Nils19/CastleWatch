@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import time
 
-from dev.cv.object_detector import ObjectDetector
+from dev.cv.color_object_detector import ColorObjectDetector
 
-detector = ObjectDetector(camera_id=1)
+detector = ColorObjectDetector(camera_id=1)
 detector.start()
 
 while True:
