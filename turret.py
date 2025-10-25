@@ -1,6 +1,10 @@
+from __future__ import annotations
+
+import time
+
 import cv2
 import serial
-import time
+
 
 # PID controller function
 def pid_output(error, previous_error, integral, Kp, Ki, Kd, dt):
@@ -8,6 +12,7 @@ def pid_output(error, previous_error, integral, Kp, Ki, Kd, dt):
     derivative = (error - previous_error) / dt
     command = Kp * error + Ki * integral + Kd * derivative
     return command, integral, error
+
 
 def compute_target_coordinates(cap, face_cascade):
     ret, frame = cap.read()
@@ -26,7 +31,7 @@ def compute_target_coordinates(cap, face_cascade):
     cv2.circle(frame, frame_center, 5, (255, 0, 0), -1)
 
     if len(faces) == 0:
-        cv2.imshow("Face Tracking", frame)
+        cv2.imshow('Face Tracking', frame)
         return None, frame_center, frame
 
     x, y, w, h = faces[0]
@@ -35,37 +40,41 @@ def compute_target_coordinates(cap, face_cascade):
     cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
     cv2.circle(frame, face_center, 5, (0, 0, 255), -1)
     cv2.line(frame, face_center, frame_center, (0, 255, 255), 2)
-    cv2.imshow("Face Tracking", frame)
+    cv2.imshow('Face Tracking', frame)
 
     return face_center, frame_center, frame
 
+
 def compute_aim_error(face_center, frame_center):
     if face_center is None:
-        return 0, 0  
+        return 0, 0
     error_x = frame_center[0] - face_center[0]
     error_y = face_center[1] - frame_center[1]
     print(f"Error: {error_x}, {error_y}")
     return error_x, error_y
 
+
 # Arduino setup
-arduino_port = "COM8"  # adjust to your port
+arduino_port = 'COM4'  # adjust to your port
 baud_rate = 9600
 ser = serial.Serial(arduino_port, baud_rate, timeout=1)
 time.sleep(2)  # Wait for Arduino to reset
 
 # OpenCV setup
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-cap = cv2.VideoCapture(0)
+face_cascade = cv2.CascadeClassifier(
+    cv2.data.haarcascades + 'haarcascade_frontalface_default.xml',
+)
+cap = cv2.VideoCapture(2)
 if not cap.isOpened():
-    print("Error: Could not open webcam.")
+    print('Error: Could not open webcam.')
     exit()
 
 # Give camera time to initialize
-print("Initializing camera...")
+print('Initializing camera...')
 for _ in range(10):
     ret, _ = cap.read()
     time.sleep(0.1)
-print("Camera ready!")
+print('Camera ready!')
 
 # PID parameters
 Kp, Ki, Kd = 0.06, 0.001, 0
@@ -76,14 +85,20 @@ previous_error_x = previous_error_y = 0
 # Main loop
 try:
     while True:
-        face_center, frame_center, frame = compute_target_coordinates(cap, face_cascade)
+        face_center, frame_center, frame = compute_target_coordinates(
+            cap, face_cascade,
+        )
         if frame is None:
-            print("Error reading frame")
+            print('Error reading frame')
             break
 
         error_x, error_y = compute_aim_error(face_center, frame_center)
-        command_x, integral_x, previous_error_x = pid_output(error_x, previous_error_x, integral_x, Kp, Ki, Kd, dt)
-        command_y, integral_y, previous_error_y = pid_output(error_y, previous_error_y, integral_y, Kp, Ki, Kd, dt)
+        command_x, integral_x, previous_error_x = pid_output(
+            error_x, previous_error_x, integral_x, Kp, Ki, Kd, dt,
+        )
+        command_y, integral_y, previous_error_y = pid_output(
+            error_y, previous_error_y, integral_y, Kp, Ki, Kd, dt,
+        )
 
         # Send commands to Arduino
         ser.write(f"{command_x:.2f},{command_y:.2f}\n".encode())
@@ -101,4 +116,4 @@ finally:
     cap.release()
     cv2.destroyAllWindows()
     ser.close()
-    print("Cleanup complete")
+    print('Cleanup complete')
