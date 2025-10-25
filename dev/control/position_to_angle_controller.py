@@ -4,10 +4,9 @@ import json
 import threading
 import time
 from pathlib import Path
+import math  
 
 import serial
-
-from dev.util.constants import FILEPATH_SIMULATION_LOG
 
 
 class PositionToAngleController:
@@ -16,6 +15,12 @@ class PositionToAngleController:
         arduino_port='COM4',
         baud_rate=9600,
         log_file_path='C:\\Users\\gemv\\repos\\private\\CastleWatch\\out\\detection.log',
+        frame_width=640,
+        frame_height=480,
+        camera_fov_horizontal=62.0,  # degrees
+        camera_fov_vertical=48.0,  # degrees
+        kp_pan=0.5,  # Proportional gain for pan (tune this)
+        kp_tilt=0.5,  # Proportional gain for tilt (tune this)
     ):
         """Initialize the controller with Arduino and log file settings"""
         self.arduino_port = arduino_port
@@ -25,11 +30,25 @@ class PositionToAngleController:
         self.running = False
         self.thread = None
 
-        # Camera field of view settings
-        self.CAMERA_FOV_HORIZONTAL = 62.0  # degrees (typical webcam)
-        self.CAMERA_FOV_VERTICAL = 48.0  # degrees
-        self.frame_width = 640
-        self.frame_height = 480
+        # --- Store frame dimensions ---
+        self.frame_width = frame_width
+        self.frame_height = frame_height
+
+        # --- Calculate and store focal lengths in pixels ---
+        # f_x = (width / 2) / tan(HFOV / 2)
+        self.focal_length_x = (self.frame_width / 2) / math.tan(
+            math.radians(camera_fov_horizontal / 2)
+        )
+        # f_y = (height / 2) / tan(VFOV / 2)
+        self.focal_length_y = (self.frame_height / 2) / math.tan(
+            math.radians(camera_fov_vertical / 2)
+        )
+
+        print(f"Calculated focal lengths: fx={self.focal_length_x:.2f}px, fy={self.focal_length_y:.2f}px")
+
+        # --- Store PID gains ---
+        self.Kp_pan = kp_pan
+        self.Kp_tilt = kp_tilt
 
     def start(self):
         """Start monitoring the log file and sending commands to Arduino"""
@@ -69,17 +88,27 @@ class PositionToAngleController:
         print('Position to angle controller stopped')
 
     def calculate_motor_commands(self, error_x, error_y):
-        """Convert pixel errors to motor movement commands"""
+        """
+        Convert pixel errors to motor movement commands using pinhole camera model
+        and a P-controller.
+        """
 
-        # Convert pixels to degrees
-        degrees_per_pixel_x = self.CAMERA_FOV_HORIZONTAL / self.frame_width
-        degrees_per_pixel_y = self.CAMERA_FOV_VERTICAL / self.frame_height
+        # --- New Trigonometric Calculation ---
+        # Calculate angular error in radians using atan(pixel_error / focal_length)
+        pan_error_rad = math.atan(error_x / self.focal_length_x)
+        tilt_error_rad = math.atan(error_y / self.focal_length_y)
 
-        # Calculate required movement in degrees
-        pan_movement = error_x * degrees_per_pixel_x  # positive = move right
-        tilt_movement = (
-            -error_y * degrees_per_pixel_y
-        )  # negative because Y is inverted
+        # Convert angular error to degrees
+        pan_error_deg = math.degrees(pan_error_rad)
+        tilt_error_deg = math.degrees(tilt_error_rad)
+
+        # --- Apply P-controller ---
+        # The command is proportional to the error.
+        # You can tune Kp_pan and Kp_tilt for smoother/faster response.
+        pan_movement = self.Kp_pan * pan_error_deg
+
+        # Apply negative gain to tilt to match image coordinates (Y points down)
+        tilt_movement = -self.Kp_tilt * tilt_error_deg
 
         return pan_movement, tilt_movement
 
@@ -92,6 +121,8 @@ class PositionToAngleController:
                 and 'vector_x' in data
                 and 'vector_y' in data
             ):
+                # We assume vector_x and vector_y are the pixel errors from the center
+                # (e.g., detection_x - center_x)
                 return data['vector_x'], data['vector_y']
         except json.JSONDecodeError:
             pass
