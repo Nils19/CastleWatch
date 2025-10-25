@@ -20,7 +20,7 @@ class ColorObjectDetector:
     calculates their center coordinates, and logs positions at 60Hz frequency.
     """
 
-    def __init__(self, camera_id):
+    def __init__(self, camera_id, width, height):
         """
         Initialize the ObjectDetector with camera configuration.
 
@@ -36,7 +36,9 @@ class ColorObjectDetector:
         self.camera_id = camera_id
         self.cap = None
         self.kernel = np.ones((5, 5), np.uint8)
-        self._target_interval = 1 / 30
+        self._target_interval = 0.2
+        self._width = width
+        self._height = height
 
         # Color bounds (default to orange detection)
         self.lower_color = np.array([5, 120, 150])
@@ -49,7 +51,7 @@ class ColorObjectDetector:
         self.thread_lock = threading.Lock()
 
         # Detection results
-        self.current_center = None
+        self.current_vector = None
         self.last_detection_time = 0
 
         # Initialize camera
@@ -63,20 +65,8 @@ class ColorObjectDetector:
                 f"Failed to open camera with ID {self.camera_id}",
             )
 
-        # Set resolution to 640x480
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
-    def set_color_bounds(self, lower_color, upper_color):
-        """
-        Configure HSV color range for object detection.
-
-        Args:
-            lower_color (numpy.array): HSV lower bound (e.g., [5, 120, 150])
-            upper_color (numpy.array): HSV upper bound (e.g., [35, 255, 255])
-        """
-        self.lower_color = np.array(lower_color)
-        self.upper_color = np.array(upper_color)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
 
     def start(self):
         """
@@ -95,7 +85,6 @@ class ColorObjectDetector:
         )
         self.detection_thread.start()
 
-        # Start logging thread (exactly 60Hz)
         self.logging_thread = threading.Thread(
             target=self._logging_loop,
             daemon=True,
@@ -130,12 +119,12 @@ class ColorObjectDetector:
             if not ret:
                 continue
 
-            center = self._process_frame(frame)
+            vector = self._process_frame(frame)
 
             # Thread-safe update of detection results
             with self.thread_lock:
-                self.current_center = center
-                if center is not None:
+                self.current_vector = vector
+                if vector is not None:
                     self.last_detection_time = time.time()
 
     def _logging_loop(self):
@@ -148,15 +137,20 @@ class ColorObjectDetector:
 
             # Get current detection result (thread-safe)
             with self.thread_lock:
-                center_to_log = self.current_center
+                vector_to_log = self.current_vector
 
             # Log only when object is detected
-            if center_to_log is not None:
+            if vector_to_log is not None:
                 log_data = {
-                    'center_x': center_to_log[0],
-                    'center_y': center_to_log[1],
+                    'vector_x': vector_to_log[0],
+                    'vector_y': vector_to_log[1],
                 }
                 logger.info(log_data)
+                
+                # Force flush to ensure logs appear immediately in tail -f
+                for handler in logger.handlers:
+                    if hasattr(handler, 'flush'):
+                        handler.flush()
 
             # Calculate sleep time to maintain 60Hz
             elapsed = time.time() - start_time
@@ -172,7 +166,7 @@ class ColorObjectDetector:
             frame: Input BGR frame from camera
 
         Returns:
-            tuple: (center_x, center_y) if object detected, None otherwise
+            tuple: (vector_x, vector_y) from camera center to object center if detected, None otherwise
         """
         # Apply Gaussian blur (3x3 kernel)
         frame = cv2.GaussianBlur(frame, (3, 3), 0)
@@ -200,7 +194,8 @@ class ColorObjectDetector:
         )
         contours = contours[0] if len(contours) == 2 else contours[1]
 
-        center = None
+        vector = None
+        object_center = None
         if len(contours) > 0:
             # Select largest contour by area
             largest_contour = max(contours, key=cv2.contourArea)
@@ -214,8 +209,17 @@ class ColorObjectDetector:
                 # Apply minimum radius threshold (radius > 5)
                 ((x, y), radius) = cv2.minEnclosingCircle(largest_contour)
 
-                if radius > 5:
-                    center = (center_x, center_y)
+                # Calculate vector from camera center to object center
+                camera_center_x = self._width // 2
+                camera_center_y = self._height // 2
+                vector_x = center_x - camera_center_x
+                vector_y = center_y - camera_center_y
+
+                vector = (vector_x, vector_y)
+                object_center = (center_x, center_y)
+
+        # Add visual overlays
+        self._draw_overlays(frame, object_center, vector)
 
         # Debug windows
         if DEBUG:
@@ -223,4 +227,37 @@ class ColorObjectDetector:
             cv2.imshow('Mask', mask)
             cv2.waitKey(1)
 
-        return center
+        return vector
+
+    def _draw_overlays(self, frame, object_center, vector):
+        """
+        Draw visual overlays on the frame including camera center, object center, and vector.
+
+        Args:
+            frame: BGR frame to draw on
+            object_center: (x, y) coordinates of detected object center, or None
+            vector: (vector_x, vector_y) from camera center to object, or None
+        """
+        camera_center_x = self._width // 2
+        camera_center_y = self._height // 2
+        camera_center = (camera_center_x, camera_center_y)
+
+        # Draw camera center as a blue cross
+        cv2.drawMarker(frame, camera_center, (255, 0, 0), cv2.MARKER_CROSS, 20, 2)
+        cv2.putText(frame, 'Camera Center', (camera_center_x + 15, camera_center_y - 10), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+
+        # If object is detected, draw object center and vector
+        if object_center is not None and vector is not None:
+            # Draw object center as a green circle
+            cv2.circle(frame, object_center, 8, (0, 255, 0), -1)
+            cv2.putText(frame, 'Object Center', (object_center[0] + 15, object_center[1] - 10), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
+            # Draw vector line from camera center to object center
+            cv2.arrowedLine(frame, camera_center, object_center, (0, 255, 255), 2, tipLength=0.1)
+
+            # Display vector values
+            vector_text = f'Vector: ({vector[0]}, {vector[1]})'
+            cv2.putText(frame, vector_text, (10, 30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
