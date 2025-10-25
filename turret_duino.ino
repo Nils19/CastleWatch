@@ -3,55 +3,74 @@
 Servo servoX;
 Servo servoY;
 
-int posX = 90;
-int posY = 90;
-
-int commandX = 0;
-int commandY = 0;
+float posX = 90.0;  // Use float for smoother interpolation
+float posY = 90.0;
+float targetX = 90.0;
+float targetY = 90.0;
 
 int servoXPin = 9;
 int servoYPin = 10;
 
-// Sensitivity factor to scale the error to servo movement
-float k = 1; // Adjust this for smoother/faster movement
+// Smoothing factor (0.1 = very smooth, 0.9 = very responsive)
+float smoothing = 0.15;
+
+// Minimum movement threshold to reduce jitter
+float deadzone = 0.5;
 
 void setup() {
   Serial.begin(9600);
   servoX.attach(servoXPin);
   servoY.attach(servoYPin);
-
+  
   // Center servos
-  servoX.write(0);
-  servoY.write(0);
-  delay(1000);
   servoX.write(90);
   servoY.write(90);
+  delay(1000);
 }
 
 void loop() {
   if (Serial.available() > 0) {
-    String data = Serial.readStringUntil('\n'); // Read until newline
+    String data = Serial.readStringUntil('\n');
     data.trim();
-
+    
     int commaIndex = data.indexOf(',');
     if (commaIndex > 0) {
       String xStr = data.substring(0, commaIndex);
       String yStr = data.substring(commaIndex + 1);
-
-      commandX = xStr.toInt(); // Convert to integer
-      commandY = yStr.toInt();
-
-      // Update servo positions based on error
-      posX += int(commandX);
-      posY += int(commandY);
-
-      // Constrain to valid servo range
-      posX = constrain(posX, 0, 180);
-      posY = constrain(posY, 0, 180);
-
-      // Move servos
-      servoX.write(posX);
-      servoY.write(posY);
+      
+      float commandX = xStr.toFloat();
+      float commandY = yStr.toFloat();
+      
+      // Update target positions
+      targetX += commandX;
+      targetY += commandY;
+      
+      // Constrain targets
+      targetX = constrain(targetX, 0, 180);
+      targetY = constrain(targetY, 0, 180);
     }
   }
+  
+  // Smooth movement towards target
+  float deltaX = targetX - posX;
+  float deltaY = targetY - posY;
+  
+  // Apply deadzone to reduce micro-movements
+  if (abs(deltaX) > deadzone) {
+    posX += deltaX * smoothing;
+  }
+  if (abs(deltaY) > deadzone) {
+    posY += deltaY * smoothing;
+  }
+  
+  // Constrain current positions
+  posX = constrain(posX, 0, 180);
+  posY = constrain(posY, 0, 180);
+  
+  // Write to servos
+  servoX.write((int)posX);
+  servoY.write((int)posY);
+  
+  // Small delay for smooth operation
+  delay(20);  // 50Hz update rate
 }
