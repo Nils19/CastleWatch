@@ -19,19 +19,15 @@ class PositionToAngleController:
         frame_height=480,
         camera_fov_horizontal=62.0,  # degrees
         camera_fov_vertical=48.0,  # degrees
+        # --- ADDED: Set this to your camera's roll angle in degrees ---
+        roll_compensation_degrees=2,
         # --- PID Gains (These require tuning!) ---
-        # kp_pan=0.2,   # Proportional gain
-        # ki_pan=0.05,  # Integral gain
-        # kd_pan=0.1,   # Derivative gain
-        # kp_tilt=0.2,  # Proportional gain
-        # ki_tilt=0.05, # Integral gain
-        # kd_tilt=0.3,  # Derivative gain
-        kp_pan=0.35,  # Drastically reduced Kp to stop over-reaction
-        ki_pan=0.01,  # Very small Ki to prevent integral windup
-        kd_pan=0.01,  # Reduced Kd to prevent "derivative kick"
-        kp_tilt=0.35,  # Match pan values for tilt
-        ki_tilt=0.01,
-        kd_tilt=0.01,
+        kp_pan=0.35,  # Proportional gain
+        ki_pan=0.01,  # Integral gain
+        kd_pan=0.01,  # Derivative gain
+        kp_tilt=0.35,  # Proportional gain
+        ki_tilt=0.01,  # Integral gain
+        kd_tilt=0.01,  # Derivative gain
     ):
         """Initialize the controller with Arduino and log file settings"""
         self.arduino_port = arduino_port
@@ -53,6 +49,17 @@ class PositionToAngleController:
         print(
             f"Calculated focal lengths: fx={self.focal_length_x:.2f}px, fy={self.focal_length_y:.2f}px",
         )
+
+        # --- NEW: Pre-calculate values for roll compensation ---
+        if roll_compensation_degrees != 0.0:
+            print(
+                f"Applying roll compensation for {roll_compensation_degrees}°",
+            )
+            self._roll_angle_rad = math.radians(roll_compensation_degrees)
+            self._cos_roll = math.cos(self._roll_angle_rad)
+            self._sin_roll = math.sin(self._roll_angle_rad)
+        else:
+            self._roll_angle_rad = 0.0
 
         # --- Store PID gains ---
         self.Kp_pan, self.Ki_pan, self.Kd_pan = kp_pan, ki_pan, kd_pan
@@ -114,6 +121,7 @@ class PositionToAngleController:
     def calculate_pid_commands(self, error_x, error_y):
         """
         Convert pixel errors to motor movement commands using a PID controller.
+        Includes roll compensation for the input error vector.
         """
         current_time = time.time()
         dt = current_time - self._previous_time
@@ -121,9 +129,24 @@ class PositionToAngleController:
         if dt <= 0.001:
             dt = 0.001
 
+        # --- UPDATED: Apply roll compensation to the error vector ---
+        if self._roll_angle_rad != 0.0:
+            # Apply 2D rotation matrix to "derotate" the error
+            corrected_error_x = (
+                error_x * self._cos_roll + error_y * self._sin_roll
+            )
+            corrected_error_y = (
+                -error_x * self._sin_roll + error_y * self._cos_roll
+            )
+        else:
+            # If no roll, use original errors
+            corrected_error_x = error_x
+            corrected_error_y = error_y
+
         # --- 1. Calculate Angular Error (Proportional Term) ---
-        pan_error_rad = math.atan(error_x / self.focal_length_x)
-        tilt_error_rad = math.atan(error_y / self.focal_length_y)
+        # Use the corrected error values for all subsequent calculations
+        pan_error_rad = math.atan(corrected_error_x / self.focal_length_x)
+        tilt_error_rad = math.atan(corrected_error_y / self.focal_length_y)
         pan_error_deg = math.degrees(pan_error_rad)
         tilt_error_deg = math.degrees(tilt_error_rad)
 
@@ -143,7 +166,7 @@ class PositionToAngleController:
 
         # --- 3. Calculate Derivative Term ---
         derivative_pan = (pan_error_deg - self._previous_error_pan) / dt
-        derivative_tilt = (pan_error_deg - self._previous_error_tilt) / dt
+        derivative_tilt = (tilt_error_deg - self._previous_error_tilt) / dt
 
         # --- 4. Combine PID terms to get the output ---
         pan_movement = (
@@ -206,7 +229,7 @@ class PositionToAngleController:
             else 0
         )
 
-        # --- ADDED: Timeout for resetting PID if no new data arrives ---
+        # --- Timeout for resetting PID if no new data arrives ---
         last_detection_time = time.time()
         no_detection_timeout = 1.0  # seconds
 
@@ -225,7 +248,7 @@ class PositionToAngleController:
                                 break
                             vector_x, vector_y = self._parse_log_entry(line)
                             if vector_x is not None and vector_y is not None:
-                                # --- Use the new PID calculation method ---
+                                # --- Use the PID calculation with roll comp ---
                                 pan_degrees, tilt_degrees = (
                                     self.calculate_pid_commands(
                                         vector_x, vector_y,
@@ -236,7 +259,7 @@ class PositionToAngleController:
                                 )
                                 last_detection_time = time.time()  # Reset timer
 
-                    # --- If no detection for a while, reset PID to prevent stale values ---
+                    # If no detection for a while, reset PID to prevent stale values
                     if time.time() - last_detection_time > no_detection_timeout:
                         self.reset_pid()
                         # Keep the timer updated to avoid repeated resets

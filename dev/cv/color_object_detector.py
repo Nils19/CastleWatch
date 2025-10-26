@@ -146,7 +146,7 @@ class ColorObjectDetector:
                     'vector_y': vector_to_log[1],
                 }
                 logger.info(log_data)
-
+                
                 # Force flush to ensure logs appear immediately in tail -f
                 for handler in logger.handlers:
                     if hasattr(handler, 'flush'):
@@ -243,51 +243,21 @@ class ColorObjectDetector:
         camera_center = (camera_center_x, camera_center_y)
 
         # Draw camera center as a blue cross
-        cv2.drawMarker(
-            frame, camera_center, (255, 0, 0), cv2.MARKER_CROSS, 20, 2,
-        )
-        cv2.putText(
-            frame,
-            'Camera Center',
-            (camera_center_x + 15, camera_center_y - 10),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (255, 0, 0),
-            1,
-        )
+        cv2.drawMarker(frame, camera_center, (255, 0, 0), cv2.MARKER_CROSS, 20, 2)
+        cv2.putText(frame, 'Camera Center', (camera_center_x + 15, camera_center_y - 10), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
 
         # If object is detected, draw object center and vector
         if object_center is not None and vector is not None:
             # Draw object center as a green circle
             cv2.circle(frame, object_center, 8, (0, 255, 0), -1)
-            cv2.putText(
-                frame,
-                'Object Center',
-                (object_center[0] + 15, object_center[1] - 10),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (0, 255, 0),
-                1,
-            )
+            cv2.putText(frame, 'Object Center', (object_center[0] + 15, object_center[1] - 10), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
             # Draw vector line from camera center to object center
-            cv2.arrowedLine(
-                frame,
-                camera_center,
-                object_center,
-                (0, 255, 255),
-                2,
-                tipLength=0.1,
-            )
+            cv2.arrowedLine(frame, camera_center, object_center, (0, 255, 255), 2, tipLength=0.1)
 
             # Display vector values
             vector_text = f'Vector: ({vector[0]}, {vector[1]})'
-            cv2.putText(
-                frame,
-                vector_text,
-                (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 255, 255),
-                2,
-            )
+            cv2.putText(frame, vector_text, (10, 30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
