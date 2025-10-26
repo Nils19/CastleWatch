@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
+import math
 import threading
 import time
 from pathlib import Path
-import math
 
 import serial
 
@@ -27,12 +27,11 @@ class PositionToAngleController:
         # ki_tilt=0.05, # Integral gain
         # kd_tilt=0.3,  # Derivative gain
         kp_pan=0.35,  # Drastically reduced Kp to stop over-reaction
-        ki_pan=0.01, # Very small Ki to prevent integral windup
-        kd_pan=0.005,   # Reduced Kd to prevent "derivative kick"
-
-        kp_tilt=0.35, # Match pan values for tilt
+        ki_pan=0.01,  # Very small Ki to prevent integral windup
+        kd_pan=0.01,  # Reduced Kd to prevent "derivative kick"
+        kp_tilt=0.35,  # Match pan values for tilt
         ki_tilt=0.01,
-        kd_tilt=0.005,
+        kd_tilt=0.01,
     ):
         """Initialize the controller with Arduino and log file settings"""
         self.arduino_port = arduino_port
@@ -46,12 +45,14 @@ class PositionToAngleController:
         self.frame_height = frame_height
 
         self.focal_length_x = (self.frame_width / 2) / math.tan(
-            math.radians(camera_fov_horizontal / 2)
+            math.radians(camera_fov_horizontal / 2),
         )
         self.focal_length_y = (self.frame_height / 2) / math.tan(
-            math.radians(camera_fov_vertical / 2)
+            math.radians(camera_fov_vertical / 2),
         )
-        print(f"Calculated focal lengths: fx={self.focal_length_x:.2f}px, fy={self.focal_length_y:.2f}px")
+        print(
+            f"Calculated focal lengths: fx={self.focal_length_x:.2f}px, fy={self.focal_length_y:.2f}px",
+        )
 
         # --- Store PID gains ---
         self.Kp_pan, self.Ki_pan, self.Kd_pan = kp_pan, ki_pan, kd_pan
@@ -61,11 +62,10 @@ class PositionToAngleController:
         self._previous_time = None
         self._previous_error_pan, self._previous_error_tilt = 0.0, 0.0
         self._integral_pan, self._integral_tilt = 0.0, 0.0
-        
+
         # --- Anti-windup clamp for the integral term ---
         self.integral_clamp_pan = 10.0  # Max integral value in degrees
-        self.integral_clamp_tilt = 10.0 # Max integral value in degrees
-
+        self.integral_clamp_tilt = 10.0  # Max integral value in degrees
 
     def start(self):
         """Start monitoring the log file and sending commands to Arduino"""
@@ -75,14 +75,16 @@ class PositionToAngleController:
 
         try:
             self.ser = serial.Serial(
-                self.arduino_port, self.baud_rate, timeout=1,
+                self.arduino_port,
+                self.baud_rate,
+                timeout=1,
             )
             time.sleep(2)
             print(f"Connected to Arduino on {self.arduino_port}")
 
             # --- Reset PID state on start ---
             self.reset_pid()
-            
+
             self.running = True
             self.thread = threading.Thread(target=self._run, daemon=True)
             self.thread.start()
@@ -104,7 +106,7 @@ class PositionToAngleController:
 
     def reset_pid(self):
         """Resets the PID controller's state variables."""
-        print("Resetting PID state.")
+        print('Resetting PID state.')
         self._previous_time = time.time()
         self._previous_error_pan, self._previous_error_tilt = 0.0, 0.0
         self._integral_pan, self._integral_tilt = 0.0, 0.0
@@ -117,7 +119,7 @@ class PositionToAngleController:
         dt = current_time - self._previous_time
         # Avoid division by zero on the first loop
         if dt <= 0.001:
-            dt = 0.001 
+            dt = 0.001
 
         # --- 1. Calculate Angular Error (Proportional Term) ---
         pan_error_rad = math.atan(error_x / self.focal_length_x)
@@ -128,24 +130,34 @@ class PositionToAngleController:
         # --- 2. Calculate Integral Term (with Anti-Windup) ---
         self._integral_pan += pan_error_deg * dt
         self._integral_tilt += tilt_error_deg * dt
-        
+
         # Clamp the integral to prevent windup
-        self._integral_pan = max(min(self._integral_pan, self.integral_clamp_pan), -self.integral_clamp_pan)
-        self._integral_tilt = max(min(self._integral_tilt, self.integral_clamp_tilt), -self.integral_clamp_tilt)
+        self._integral_pan = max(
+            min(self._integral_pan, self.integral_clamp_pan),
+            -self.integral_clamp_pan,
+        )
+        self._integral_tilt = max(
+            min(self._integral_tilt, self.integral_clamp_tilt),
+            -self.integral_clamp_tilt,
+        )
 
         # --- 3. Calculate Derivative Term ---
         derivative_pan = (pan_error_deg - self._previous_error_pan) / dt
         derivative_tilt = (pan_error_deg - self._previous_error_tilt) / dt
 
         # --- 4. Combine PID terms to get the output ---
-        pan_movement = (self.Kp_pan * pan_error_deg) + \
-                       (self.Ki_pan * self._integral_pan) + \
-                       (self.Kd_pan * derivative_pan)
-        
+        pan_movement = (
+            (self.Kp_pan * pan_error_deg)
+            + (self.Ki_pan * self._integral_pan)
+            + (self.Kd_pan * derivative_pan)
+        )
+
         # Apply negative gain to tilt to match image coordinates (Y points down)
-        tilt_movement = -((self.Kp_tilt * tilt_error_deg) + \
-                          (self.Ki_tilt * self._integral_tilt) + \
-                          (self.Kd_tilt * derivative_tilt))
+        tilt_movement = -(
+            (self.Kp_tilt * tilt_error_deg)
+            + (self.Ki_tilt * self._integral_tilt)
+            + (self.Kd_tilt * derivative_tilt)
+        )
 
         # --- 5. Update state for the next iteration ---
         self._previous_error_pan = pan_error_deg
@@ -188,11 +200,15 @@ class PositionToAngleController:
         if not self.log_file_path.exists():
             print(f"Log file {self.log_file_path} does not exist. Waiting...")
 
-        last_position = self.log_file_path.stat().st_size if self.log_file_path.exists() else 0
-        
+        last_position = (
+            self.log_file_path.stat().st_size
+            if self.log_file_path.exists()
+            else 0
+        )
+
         # --- ADDED: Timeout for resetting PID if no new data arrives ---
         last_detection_time = time.time()
-        no_detection_timeout = 1.0 # seconds
+        no_detection_timeout = 1.0  # seconds
 
         while self.running:
             try:
@@ -210,21 +226,23 @@ class PositionToAngleController:
                             vector_x, vector_y = self._parse_log_entry(line)
                             if vector_x is not None and vector_y is not None:
                                 # --- Use the new PID calculation method ---
-                                pan_degrees, tilt_degrees = self.calculate_pid_commands(
-                                    vector_x, vector_y
+                                pan_degrees, tilt_degrees = (
+                                    self.calculate_pid_commands(
+                                        vector_x, vector_y,
+                                    )
                                 )
                                 self._send_command_to_arduino(
-                                    pan_degrees, tilt_degrees
+                                    pan_degrees, tilt_degrees,
                                 )
-                                last_detection_time = time.time() # Reset timer
-                    
+                                last_detection_time = time.time()  # Reset timer
+
                     # --- If no detection for a while, reset PID to prevent stale values ---
                     if time.time() - last_detection_time > no_detection_timeout:
                         self.reset_pid()
                         # Keep the timer updated to avoid repeated resets
                         last_detection_time = time.time()
 
-                time.sleep(0.02) # Reduced delay for more responsive control
+                time.sleep(0.02)  # Reduced delay for more responsive control
 
             except Exception as e:
                 print(f"Error in monitoring loop: {e}")

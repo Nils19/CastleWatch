@@ -9,6 +9,14 @@ int posY = 90;
 int commandX = 0;
 int commandY = 0;
 
+// Add smoothing variables
+float smoothedX = 90.0;
+float smoothedY = 90.0;
+float alpha = 1.0; // Smoothing factor (0.1 = heavy smoothing, 0.9 = light smoothing)
+
+// Add deadband threshold
+int deadband = 0.02; // Ignore movements smaller than this
+
 int servoXPin = 9;
 int servoYPin = 10;
 
@@ -27,7 +35,7 @@ void setup() {
 
 void loop() {
   if (Serial.available() > 0) {
-    String data = Serial.readStringUntil('\n'); // Read until newline
+    String data = Serial.readStringUntil('\n');
     data.trim();
 
     int commaIndex = data.indexOf(',');
@@ -35,20 +43,25 @@ void loop() {
       String xStr = data.substring(0, commaIndex);
       String yStr = data.substring(commaIndex + 1);
 
-      commandX = xStr.toInt(); // Convert to integer
-      commandY = yStr.toInt();
+      commandX = xStr.toFloat();
+      commandY = yStr.toFloat();
 
-      // Update servo positions based on error
-      posX += int(commandX);
-      posY += int(commandY);
+      // Apply deadband - only move if command is significant
+      if (abs(commandX) > deadband || abs(commandY) > deadband) {
+        int targetX = posX + commandX;
+        int targetY = posY + commandY;
 
-      // Constrain to valid servo range
-      posX = constrain(posX, 0, 180);
-      posY = constrain(posY, 0, 180);
+        smoothedX = alpha * targetX + (1.0 - alpha) * smoothedX;
+        smoothedY = alpha * targetY + (1.0 - alpha) * smoothedY;
 
-      // Move servos
-      servoX.write(posX);
-      servoY.write(posY);
+        posX = constrain((int)smoothedX, 0, 180);
+        posY = constrain((int)smoothedY, 0, 180);
+
+        servoX.write(posX);
+        servoY.write(posY);
+
+        delay(20);
+      }
     }
   }
 }
