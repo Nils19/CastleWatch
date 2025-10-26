@@ -22,11 +22,11 @@ class PositionToAngleController:
         # --- ADDED: Set this to your camera's roll angle in degrees ---
         roll_compensation_degrees=2,
         # --- PID Gains (These require tuning!) ---
-        kp_pan=0.35,  # Proportional gain
-        ki_pan=0.01,  # Integral gain
+        kp_pan=0.30,  # Proportional gain
+        ki_pan=0.015,  # Integral gain
         kd_pan=0.01,  # Derivative gain
         kp_tilt=0.35,  # Proportional gain
-        ki_tilt=0.01,  # Integral gain
+        ki_tilt=0.015,  # Integral gain
         kd_tilt=0.01,  # Derivative gain
     ):
         """Initialize the controller with Arduino and log file settings"""
